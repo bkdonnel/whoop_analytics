@@ -2,7 +2,7 @@
 
 ## Project
 
-Whoop Analytics Pipeline — see `README.md` for full project scope, differentiation strategy, data sources, stack, and build sequencing, and `IMPLEMENTATION.md` for the phased build plan and current progress. As of 2026-11-11, git is initialized locally (no GitHub remote yet) and Phase 0 (project setup) is underway; no ingestion/dashboard code exists yet.
+Whoop Analytics Pipeline — see `README.md` for full project scope, differentiation strategy, data sources, stack, and build sequencing, and `IMPLEMENTATION.md` for the phased build plan and current progress. As of 2026-11-13, Phase 0 (project setup) is complete: code is pushed to a public GitHub remote (`github.com/bkdonnel/whoop_analytics`), a Whoop developer app is registered, and the Databricks workspace/schemas and secret scope are set up (see `IMPLEMENTATION.md` for the shared-metastore schema layout this required). No ingestion/dashboard code exists yet; Phase 1 (OAuth flow + Bronze ingestion) is next.
 
 ## Dashboard content design (decided 2026-11-11)
 
