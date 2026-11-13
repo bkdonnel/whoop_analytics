@@ -7,8 +7,8 @@ Step-by-step build sequence for the Whoop Analytics Pipeline. See `README.md` fo
 1. ✅ `git init` the repo, commit `README.md`, `CLAUDE.md`, `IMPLEMENTATION.md`. (Done 2026-11-11 — not yet pushed to a GitHub remote; no remote created.)
 2. ✅ Create a `.gitignore` (Python venv/`.env`/notebook checkpoints/Databricks CLI config/OS/editor noise). (Done 2026-11-11.)
 3. ✅ Push to a GitHub remote. (Done 2026-11-13 — public repo at `github.com/bkdonnel/whoop_analytics`.)
-4. ⬜ Register a Whoop developer app at `developer.whoop.com` — OAuth2 client ID/secret, redirect URI, scopes `read:cycles`, `read:sleep`, `read:recovery`, `read:workout`, `read:profile`, `offline`. (Requires your own Whoop developer account — not automatable.)
-5. ⬜ Create/confirm the Databricks workspace (Free Edition or existing), and a Unity Catalog catalog + schema for this project (e.g. `whoop_analytics.bronze/silver/gold`). (Requires your own Databricks account.)
+4. ✅ Register a Whoop developer app at `developer.whoop.com` — OAuth2 client ID/secret, redirect URI `http://localhost:8080/callback`, scopes `recovery`, `cycles`, `sleep`, `workout`, `profile`, `body_measurement`. (Done 2026-11-13. Credentials stored locally in gitignored `.env`, not yet moved to a Databricks secret scope.)
+5. ✅ Create/confirm the Databricks workspace and Unity Catalog schemas for this project. (Done 2026-11-13 — workspace `dbc-7b106152-caf3.cloud.databricks.com` is a shared bootcamp metastore (`tabular`); no `CREATE CATALOG` permission there, so the project uses three schemas under the shared `bootcamp_students` catalog instead of a dedicated `whoop_analytics` catalog: `bootcamp_students.bryan_whoop_bronze`, `.bryan_whoop_silver`, `.bryan_whoop_gold`. Wherever this plan says "Bronze/Silver/Gold table," read it as "a table in the corresponding `bryan_whoop_*` schema.")
 6. ⬜ Store secrets (Whoop client ID/secret, refresh token, Databricks tokens) in a Databricks secret scope — never in the repo or notebooks directly.
 
 ## Phase 1 — Whoop OAuth + raw ingestion (Bronze)
