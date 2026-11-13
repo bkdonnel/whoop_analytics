@@ -2,7 +2,7 @@
 
 ## Project
 
-Whoop Analytics Pipeline — see `README.md` for full project scope, differentiation strategy, data sources, stack, and build sequencing. As of 2026-11-11 this repo has no code yet; it's in the design/scoping phase (no git repo initialized either).
+Whoop Analytics Pipeline — see `README.md` for full project scope, differentiation strategy, data sources, stack, and build sequencing, and `IMPLEMENTATION.md` for the phased build plan and current progress. As of 2026-11-11, git is initialized locally (no GitHub remote yet) and Phase 0 (project setup) is underway; no ingestion/dashboard code exists yet.
 
 ## Dashboard content design (decided 2026-11-11)
 

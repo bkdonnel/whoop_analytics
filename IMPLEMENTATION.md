@@ -4,11 +4,12 @@ Step-by-step build sequence for the Whoop Analytics Pipeline. See `README.md` fo
 
 ## Phase 0 — Project setup
 
-1. `git init` the repo, commit `README.md` and `CLAUDE.md`, push to GitHub.
-2. Create a `.gitignore` (Python venv/`.env`/notebook checkpoints/Databricks CLI config).
-3. Register a Whoop developer app at `developer.whoop.com` — OAuth2 client ID/secret, redirect URI, scopes `read:cycles`, `read:sleep`, `read:recovery`, `read:workout`, `read:profile`, `offline`.
-4. Create/confirm the Databricks workspace (Free Edition or existing), and a Unity Catalog catalog + schema for this project (e.g. `whoop_analytics.bronze/silver/gold`).
-5. Store secrets (Whoop client ID/secret, refresh token, Databricks tokens) in a Databricks secret scope — never in the repo or notebooks directly.
+1. ✅ `git init` the repo, commit `README.md`, `CLAUDE.md`, `IMPLEMENTATION.md`. (Done 2026-11-11 — not yet pushed to a GitHub remote; no remote created.)
+2. ✅ Create a `.gitignore` (Python venv/`.env`/notebook checkpoints/Databricks CLI config/OS/editor noise). (Done 2026-11-11.)
+3. ⬜ Push to a GitHub remote (create the remote repo first — none exists yet under this name).
+4. ⬜ Register a Whoop developer app at `developer.whoop.com` — OAuth2 client ID/secret, redirect URI, scopes `read:cycles`, `read:sleep`, `read:recovery`, `read:workout`, `read:profile`, `offline`. (Requires your own Whoop developer account — not automatable.)
+5. ⬜ Create/confirm the Databricks workspace (Free Edition or existing), and a Unity Catalog catalog + schema for this project (e.g. `whoop_analytics.bronze/silver/gold`). (Requires your own Databricks account.)
+6. ⬜ Store secrets (Whoop client ID/secret, refresh token, Databricks tokens) in a Databricks secret scope — never in the repo or notebooks directly.
 
 ## Phase 1 — Whoop OAuth + raw ingestion (Bronze)
 
