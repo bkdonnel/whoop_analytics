@@ -53,6 +53,11 @@ INTER_PAGE_DELAY_SECONDS = 0.3
 
 # COMMAND ----------
 
+dbutils.widgets.text("databricks_job_id", "manual")
+dbutils.widgets.text("databricks_run_id", "manual")
+
+# COMMAND ----------
+
 
 class WhoopOAuthConfig(BaseModel):
     client_id: str
@@ -110,6 +115,20 @@ def ensure_bronze_tables() -> None:
         CREATE TABLE IF NOT EXISTS {BRONZE_SCHEMA}.ingestion_state (
             endpoint_name STRING,
             last_pulled_at TIMESTAMP
+        ) USING DELTA
+    """)
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {BRONZE_SCHEMA}.run_metadata (
+            job_id STRING,
+            run_id STRING,
+            started_at TIMESTAMP,
+            finished_at TIMESTAMP,
+            status STRING,
+            error_message STRING,
+            recovery_count INT,
+            cycle_count INT,
+            sleep_count INT,
+            workout_count INT
         ) USING DELTA
     """)
     for endpoint in ENDPOINTS:
@@ -251,6 +270,35 @@ def write_last_pulled_at(endpoint_name: str, pulled_at: datetime) -> None:
         args={"endpoint_name": endpoint_name, "pulled_at": pulled_at},
     )
 
+
+def write_run_metadata(
+    job_id: str,
+    run_id: str,
+    started_at: datetime,
+    finished_at: datetime,
+    status: str,
+    error_message: str | None,
+    counts: dict[str, int],
+) -> None:
+    spark.sql(
+        f"""
+        INSERT INTO {BRONZE_SCHEMA}.run_metadata
+        VALUES (:job_id, :run_id, :started_at, :finished_at, :status, :error_message, :recovery_count, :cycle_count, :sleep_count, :workout_count)
+        """,
+        args={
+            "job_id": job_id,
+            "run_id": run_id,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "status": status,
+            "error_message": error_message,
+            "recovery_count": counts.get("recovery", 0),
+            "cycle_count": counts.get("cycle", 0),
+            "sleep_count": counts.get("sleep", 0),
+            "workout_count": counts.get("workout", 0),
+        },
+    )
+
 # COMMAND ----------
 
 
@@ -271,7 +319,7 @@ async def run_ingestion_for_endpoint(endpoint: WhoopEndpointConfig, access_token
 # COMMAND ----------
 
 
-async def run_bronze_ingestion() -> None:
+async def run_bronze_ingestion(counts: dict[str, int]) -> None:
     ensure_bronze_tables()
 
     config = load_oauth_config()
@@ -279,10 +327,28 @@ async def run_bronze_ingestion() -> None:
     await persist_rotated_refresh_token(tokens.refresh_token)
 
     for endpoint in ENDPOINTS:
-        await run_ingestion_for_endpoint(endpoint, tokens.access_token)
+        counts[endpoint.endpoint_name] = await run_ingestion_for_endpoint(endpoint, tokens.access_token)
+
+
+async def run_bronze_ingestion_with_metadata() -> None:
+    job_id = dbutils.widgets.get("databricks_job_id")
+    run_id = dbutils.widgets.get("databricks_run_id")
+    started_at = datetime.now(timezone.utc)
+    counts: dict[str, int] = {endpoint.endpoint_name: 0 for endpoint in ENDPOINTS}
+    status = "SUCCESS"
+    error_message: str | None = None
+
+    try:
+        await run_bronze_ingestion(counts)
+    except Exception as error:
+        status = "FAILURE"
+        error_message = str(error)
+        raise
+    finally:
+        write_run_metadata(job_id, run_id, started_at, datetime.now(timezone.utc), status, error_message, counts)
 
 
 # Databricks notebook cells run on an active asyncio event loop, so top-level
 # `await` works here. If this specific runtime/compute raises a SyntaxError or
-# RuntimeError on it, replace this line with: asyncio.run(run_bronze_ingestion())
-await run_bronze_ingestion()
+# RuntimeError on it, replace this line with: asyncio.run(run_bronze_ingestion_with_metadata())
+await run_bronze_ingestion_with_metadata()

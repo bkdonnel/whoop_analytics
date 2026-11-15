@@ -1,0 +1,28 @@
+{
+  "name": "whoop_bronze_ingestion_daily",
+  "tasks": [
+    {
+      "task_key": "ingest_bronze",
+      "notebook_task": {
+        "notebook_path": "/Users/bryankdonnelly@comcast.net/whoop_analytics/notebooks/01_whoop_ingest_bronze",
+        "source": "WORKSPACE",
+        "base_parameters": {
+          "databricks_job_id": "{{job.id}}",
+          "databricks_run_id": "{{job.run_id}}"
+        }
+      },
+      "max_retries": 3,
+      "min_retry_interval_millis": 120000,
+      "retry_on_timeout": true
+    }
+  ],
+  "schedule": {
+    "quartz_cron_expression": "0 0 9 * * ?",
+    "timezone_id": "America/Los_Angeles",
+    "pause_status": "UNPAUSED"
+  },
+  "email_notifications": {
+    "on_failure": ["bryankdonnelly@comcast.net"]
+  },
+  "max_concurrent_runs": 1
+}
