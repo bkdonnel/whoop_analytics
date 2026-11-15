@@ -26,10 +26,12 @@ Built as Databricks notebooks (not a local Python package/Databricks Connect) �
 
 ## Phase 2 — Orchestration
 
-1. Wrap the Bronze ingestion in a Databricks Job (scheduled daily).
-2. Add retry policy (e.g. 3 retries with backoff) for transient API/network failures.
-3. Add failure alerting (email or Slack webhook) on job failure after retries exhaust.
-4. Add a run-metadata table (job run id, start/end time, rows ingested, success/failure) — this becomes the data source for the Pipeline Health panel in Phase 6.
+Job definition checked into the repo as `jobs/whoop_bronze_ingestion_daily.json` (infrastructure-as-code, created via `databricks jobs create --json @jobs/whoop_bronze_ingestion_daily.json`) rather than built click-by-click in the UI.
+
+1. ✅ Wrap the Bronze ingestion in a Databricks Job (scheduled daily). (Done 2026-11-15 — job id `468100317206602`, daily at 9:00 AM `America/Los_Angeles` (`0 0 9 * * ?`), chosen to run late enough that a normal night's sleep/recovery is synced and scored by Whoop. No cluster spec needed — confirmed the scheduled Job runs on serverless compute, same as the interactive notebook.)
+2. ✅ Add retry policy (e.g. 3 retries with backoff) for transient API/network failures. (Done 2026-11-15 — `max_retries: 3`, `min_retry_interval_millis: 120000` on the task. Separate from the inline per-page 429 backoff already in the notebook itself, which handles Whoop's rate limit without needing a whole-job retry.)
+3. ✅ Add failure alerting (email or Slack webhook) on job failure after retries exhaust. (Done 2026-11-15 — email to `bryankdonnelly@comcast.net` via the job's native `email_notifications.on_failure`, no custom code.)
+4. ✅ Add a run-metadata table (job run id, start/end time, rows ingested, success/failure) — this becomes the data source for the Pipeline Health panel in Phase 6. (Done 2026-11-15 — `bootcamp_students.bryan_whoop_bronze.run_metadata`, one row per run: `job_id`/`run_id` (passed into the notebook via Job `base_parameters` referencing `{{job.id}}`/`{{job.run_id}}`, read via `dbutils.widgets`), `started_at`/`finished_at`, `status`, `error_message`, and a per-endpoint row count. The notebook re-raises on failure after writing the row, so the Job task itself fails and triggers its own retries/email — a swallowed exception would otherwise make a broken run look green. Verified end-to-end with an unattended `databricks jobs run-now` test: `SUCCESS`, real job/run ids recorded, correct small incremental counts.)
 
 ## Phase 3 — Data quality checks
 
