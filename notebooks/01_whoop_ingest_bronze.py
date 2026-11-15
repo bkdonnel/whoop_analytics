@@ -14,10 +14,12 @@
 # MAGIC
 # MAGIC Requires, in secret scope `bryan_whoop_analytics`: `whoop_client_id`,
 # MAGIC `whoop_client_secret`, `whoop_refresh_token` (all set by
-# MAGIC `scripts/whoop_authorize.py`), and `databricks_pat` (a personal access token
-# MAGIC used only to persist a rotated refresh token back to this scope, since
-# MAGIC `dbutils.secrets` can read but not write). If `databricks_pat` is missing,
-# MAGIC ingestion still runs, but a rotated refresh token won't be saved for next time.
+# MAGIC `scripts/whoop_authorize.py`). Whoop rotates the refresh token on every
+# MAGIC refresh call (confirmed empirically, not just third-party speculation), so
+# MAGIC this notebook persists the new one back to the secret scope immediately
+# MAGIC after every refresh, using `databricks.sdk.WorkspaceClient()`'s built-in
+# MAGIC notebook-native authentication (no personal access token needed or
+# MAGIC obtainable on this account anyway, per IMPLEMENTATION.md).
 # MAGIC
 # MAGIC Note on structure: CLAUDE.md's file-structure convention orders a module as
 # MAGIC utilities, then static content, then types last. Notebooks execute cell by
@@ -34,11 +36,11 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import httpx
+from databricks.sdk import WorkspaceClient
 from pydantic import BaseModel
 
 # COMMAND ----------
 
-WORKSPACE_URL = "https://dbc-7b106152-caf3.cloud.databricks.com"
 SECRET_SCOPE = "bryan_whoop_analytics"
 BRONZE_SCHEMA = "bootcamp_students.bryan_whoop_bronze"
 API_BASE_URL = "https://api.prod.whoop.com/developer"
@@ -146,23 +148,13 @@ async def refresh_access_token(config: WhoopOAuthConfig) -> TokenResponse:
 
 
 async def persist_rotated_refresh_token(new_refresh_token: str) -> None:
-    try:
-        personal_access_token = dbutils.secrets.get(scope=SECRET_SCOPE, key="databricks_pat")
-    except Exception:
-        print("No databricks_pat secret found, skipping refresh-token persistence for next run.")
-        return
-
-    async with httpx.AsyncClient(timeout=20) as client:
-        response = await client.post(
-            f"{WORKSPACE_URL}/api/2.0/secrets/put",
-            headers={"Authorization": f"Bearer {personal_access_token}"},
-            json={
-                "scope": SECRET_SCOPE,
-                "key": "whoop_refresh_token",
-                "string_value": new_refresh_token,
-            },
-        )
-    response.raise_for_status()
+    workspace_client = WorkspaceClient()
+    await asyncio.to_thread(
+        workspace_client.secrets.put_secret,
+        scope=SECRET_SCOPE,
+        key="whoop_refresh_token",
+        string_value=new_refresh_token,
+    )
 
 # COMMAND ----------
 
@@ -284,8 +276,7 @@ async def run_bronze_ingestion() -> None:
 
     config = load_oauth_config()
     tokens = await refresh_access_token(config)
-    if tokens.refresh_token != config.refresh_token:
-        await persist_rotated_refresh_token(tokens.refresh_token)
+    await persist_rotated_refresh_token(tokens.refresh_token)
 
     for endpoint in ENDPOINTS:
         await run_ingestion_for_endpoint(endpoint, tokens.access_token)
