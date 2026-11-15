@@ -4,22 +4,24 @@
 # environment_version = "6"
 # ///
 # MAGIC %md
-# MAGIC # Whoop Bronze ingestion
+# MAGIC # Whoop Bronze fetch
 # MAGIC
 # MAGIC Pulls recovery, cycle, sleep, and workout data from the Whoop v2 API and lands
-# MAGIC it as raw JSON into Bronze Delta tables, idempotently (MERGE on natural key).
+# MAGIC it as raw NDJSON files into a Unity Catalog Volume landing zone — the DLT
+# MAGIC pipeline (`pipelines/whoop_dlt_ingestion.py`) picks these up via Auto Loader,
+# MAGIC validates them, and upserts them into the final Bronze tables. This notebook
+# MAGIC never writes to those final tables itself; DLT owns them exclusively.
+# MAGIC
 # MAGIC First run per endpoint does a full backfill (no `start` bound); later runs
 # MAGIC pull incrementally from the endpoint's last successful pull, via the
-# MAGIC `ingestion_state` table.
+# MAGIC `ingestion_state` table (plain Delta, not DLT-managed).
 # MAGIC
 # MAGIC Requires, in secret scope `bryan_whoop_analytics`: `whoop_client_id`,
 # MAGIC `whoop_client_secret`, `whoop_refresh_token` (all set by
 # MAGIC `scripts/whoop_authorize.py`). Whoop rotates the refresh token on every
-# MAGIC refresh call (confirmed empirically, not just third-party speculation), so
-# MAGIC this notebook persists the new one back to the secret scope immediately
-# MAGIC after every refresh, using `databricks.sdk.WorkspaceClient()`'s built-in
-# MAGIC notebook-native authentication (no personal access token needed or
-# MAGIC obtainable on this account anyway, per IMPLEMENTATION.md).
+# MAGIC refresh call, so this notebook persists the new one back to the secret scope
+# MAGIC immediately after every refresh, using `databricks.sdk.WorkspaceClient()`'s
+# MAGIC built-in notebook-native authentication (no personal access token needed).
 # MAGIC
 # MAGIC Note on structure: CLAUDE.md's file-structure convention orders a module as
 # MAGIC utilities, then static content, then types last. Notebooks execute cell by
@@ -33,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -43,6 +46,7 @@ from pydantic import BaseModel
 
 SECRET_SCOPE = "bryan_whoop_analytics"
 BRONZE_SCHEMA = "bootcamp_students.bryan_whoop_bronze"
+LANDING_VOLUME_PATH = "/Volumes/bootcamp_students/bryan_whoop_bronze/landing"
 API_BASE_URL = "https://api.prod.whoop.com/developer"
 TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
 PULL_PAGE_LIMIT = 25
@@ -76,7 +80,6 @@ class TokenResponse(BaseModel):
 class WhoopEndpointConfig(BaseModel):
     endpoint_name: str
     endpoint_path: str
-    table_name: str
     natural_key_field: str
 
 
@@ -84,25 +87,21 @@ ENDPOINTS: list[WhoopEndpointConfig] = [
     WhoopEndpointConfig(
         endpoint_name="recovery",
         endpoint_path="/v2/recovery",
-        table_name=f"{BRONZE_SCHEMA}.recovery",
         natural_key_field="cycle_id",
     ),
     WhoopEndpointConfig(
         endpoint_name="cycle",
         endpoint_path="/v2/cycle",
-        table_name=f"{BRONZE_SCHEMA}.cycle",
         natural_key_field="id",
     ),
     WhoopEndpointConfig(
         endpoint_name="sleep",
         endpoint_path="/v2/activity/sleep",
-        table_name=f"{BRONZE_SCHEMA}.sleep",
         natural_key_field="id",
     ),
     WhoopEndpointConfig(
         endpoint_name="workout",
         endpoint_path="/v2/activity/workout",
-        table_name=f"{BRONZE_SCHEMA}.workout",
         natural_key_field="id",
     ),
 ]
@@ -110,7 +109,7 @@ ENDPOINTS: list[WhoopEndpointConfig] = [
 # COMMAND ----------
 
 
-def ensure_bronze_tables() -> None:
+def ensure_state_tables() -> None:
     spark.sql(f"""
         CREATE TABLE IF NOT EXISTS {BRONZE_SCHEMA}.ingestion_state (
             endpoint_name STRING,
@@ -131,14 +130,6 @@ def ensure_bronze_tables() -> None:
             workout_count INT
         ) USING DELTA
     """)
-    for endpoint in ENDPOINTS:
-        spark.sql(f"""
-            CREATE TABLE IF NOT EXISTS {endpoint.table_name} (
-                natural_key STRING,
-                raw_payload STRING,
-                ingested_at TIMESTAMP
-            ) USING DELTA
-        """)
 
 # COMMAND ----------
 
@@ -221,31 +212,24 @@ async def pull_all_records(endpoint: WhoopEndpointConfig, access_token: str, sta
 # COMMAND ----------
 
 
-def land_records_to_bronze(endpoint: WhoopEndpointConfig, records: list[dict], ingested_at: datetime) -> int:
+def land_records_to_volume(endpoint: WhoopEndpointConfig, records: list[dict], ingested_at: datetime) -> int:
     if not records:
         return 0
 
-    rows = [
-        {
-            "natural_key": str(record.get(endpoint.natural_key_field)),
-            "raw_payload": json.dumps(record),
-            "ingested_at": ingested_at,
-        }
-        for record in records
-    ]
+    landing_dir = f"{LANDING_VOLUME_PATH}/{endpoint.endpoint_name}"
+    os.makedirs(landing_dir, exist_ok=True)
+    file_path = f"{landing_dir}/{endpoint.endpoint_name}_{ingested_at.strftime('%Y%m%dT%H%M%S%f')}.jsonl"
 
-    staging_df = spark.createDataFrame(rows)
-    staging_df.createOrReplaceTempView("whoop_staging_records")
+    with open(file_path, "w") as landing_file:
+        for record in records:
+            row = {
+                "natural_key": str(record.get(endpoint.natural_key_field)),
+                "raw_payload": json.dumps(record),
+                "ingested_at": ingested_at.isoformat(),
+            }
+            landing_file.write(json.dumps(row) + "\n")
 
-    spark.sql(f"""
-        MERGE INTO {endpoint.table_name} AS target
-        USING whoop_staging_records AS source
-        ON target.natural_key = source.natural_key
-        WHEN MATCHED THEN UPDATE SET *
-        WHEN NOT MATCHED THEN INSERT *
-    """)
-
-    return len(rows)
+    return len(records)
 
 # COMMAND ----------
 
@@ -302,14 +286,14 @@ def write_run_metadata(
 # COMMAND ----------
 
 
-async def run_ingestion_for_endpoint(endpoint: WhoopEndpointConfig, access_token: str) -> int:
+async def fetch_endpoint(endpoint: WhoopEndpointConfig, access_token: str) -> int:
     last_pulled_at = read_last_pulled_at(endpoint.endpoint_name)
     is_backfill = last_pulled_at is None
     start = None if is_backfill else last_pulled_at - INCREMENTAL_OVERLAP
 
     records = await pull_all_records(endpoint, access_token, start)
     ingested_at = datetime.now(timezone.utc)
-    landed_count = land_records_to_bronze(endpoint, records, ingested_at)
+    landed_count = land_records_to_volume(endpoint, records, ingested_at)
     write_last_pulled_at(endpoint.endpoint_name, ingested_at)
 
     pull_kind = "backfill" if is_backfill else "incremental"
@@ -319,18 +303,18 @@ async def run_ingestion_for_endpoint(endpoint: WhoopEndpointConfig, access_token
 # COMMAND ----------
 
 
-async def run_bronze_ingestion(counts: dict[str, int]) -> None:
-    ensure_bronze_tables()
+async def fetch_all_endpoints(counts: dict[str, int]) -> None:
+    ensure_state_tables()
 
     config = load_oauth_config()
     tokens = await refresh_access_token(config)
     await persist_rotated_refresh_token(tokens.refresh_token)
 
     for endpoint in ENDPOINTS:
-        counts[endpoint.endpoint_name] = await run_ingestion_for_endpoint(endpoint, tokens.access_token)
+        counts[endpoint.endpoint_name] = await fetch_endpoint(endpoint, tokens.access_token)
 
 
-async def run_bronze_ingestion_with_metadata() -> None:
+async def fetch_bronze_with_metadata() -> None:
     job_id = dbutils.widgets.get("databricks_job_id")
     run_id = dbutils.widgets.get("databricks_run_id")
     started_at = datetime.now(timezone.utc)
@@ -339,7 +323,7 @@ async def run_bronze_ingestion_with_metadata() -> None:
     error_message: str | None = None
 
     try:
-        await run_bronze_ingestion(counts)
+        await fetch_all_endpoints(counts)
     except Exception as error:
         status = "FAILURE"
         error_message = str(error)
@@ -350,5 +334,5 @@ async def run_bronze_ingestion_with_metadata() -> None:
 
 # Databricks notebook cells run on an active asyncio event loop, so top-level
 # `await` works here. If this specific runtime/compute raises a SyntaxError or
-# RuntimeError on it, replace this line with: asyncio.run(run_bronze_ingestion_with_metadata())
-await run_bronze_ingestion_with_metadata()
+# RuntimeError on it, replace this line with: asyncio.run(fetch_bronze_with_metadata())
+await fetch_bronze_with_metadata()
