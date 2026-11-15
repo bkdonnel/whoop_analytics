@@ -41,6 +41,9 @@ API_BASE_URL = "https://api.prod.whoop.com/developer"
 TOKEN_URL = "https://api.prod.whoop.com/oauth/oauth2/token"
 PULL_PAGE_LIMIT = 25
 INCREMENTAL_OVERLAP = timedelta(days=1)
+MAX_RETRIES_PER_PAGE = 5
+BASE_RETRY_DELAY_SECONDS = 2.0
+INTER_PAGE_DELAY_SECONDS = 0.3
 
 # COMMAND ----------
 
@@ -160,6 +163,22 @@ async def persist_rotated_refresh_token(new_refresh_token: str) -> None:
 # COMMAND ----------
 
 
+async def fetch_page_with_retry(client: httpx.AsyncClient, url: str, query: dict[str, str | int]) -> dict:
+    for attempt in range(MAX_RETRIES_PER_PAGE):
+        response = await client.get(url, params=query)
+        is_rate_limited = response.status_code == 429
+        if not is_rate_limited:
+            response.raise_for_status()
+            return response.json()
+
+        retry_after = response.headers.get("Retry-After")
+        delay = float(retry_after) if retry_after else BASE_RETRY_DELAY_SECONDS * (2 ** attempt)
+        print(f"Rate limited (429) on {url}, retrying in {delay:.0f}s (attempt {attempt + 1}/{MAX_RETRIES_PER_PAGE})...")
+        await asyncio.sleep(delay)
+
+    raise RuntimeError(f"Exceeded {MAX_RETRIES_PER_PAGE} retries after repeated 429s for {url}")
+
+
 async def pull_all_records(endpoint: WhoopEndpointConfig, access_token: str, start: datetime | None) -> list[dict]:
     records: list[dict] = []
     next_token: str | None = None
@@ -173,15 +192,14 @@ async def pull_all_records(endpoint: WhoopEndpointConfig, access_token: str, sta
             if next_token:
                 query["nextToken"] = next_token
 
-            response = await client.get(f"{API_BASE_URL}{endpoint.endpoint_path}", params=query)
-            response.raise_for_status()
-            payload = response.json()
+            payload = await fetch_page_with_retry(client, f"{API_BASE_URL}{endpoint.endpoint_path}", query)
 
             records.extend(payload.get("records", []))
             next_token = payload.get("next_token")
             has_more_pages = bool(next_token)
             if not has_more_pages:
                 break
+            await asyncio.sleep(INTER_PAGE_DELAY_SECONDS)
 
     return records
 
