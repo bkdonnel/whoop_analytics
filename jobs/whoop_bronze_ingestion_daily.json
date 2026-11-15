@@ -2,9 +2,9 @@
   "name": "whoop_bronze_ingestion_daily",
   "tasks": [
     {
-      "task_key": "ingest_bronze",
+      "task_key": "fetch_bronze",
       "notebook_task": {
-        "notebook_path": "/Users/bryankdonnelly@comcast.net/whoop_analytics/notebooks/01_whoop_ingest_bronze",
+        "notebook_path": "/Users/bryankdonnelly@comcast.net/whoop_analytics/notebooks/01_whoop_fetch_bronze",
         "source": "WORKSPACE",
         "base_parameters": {
           "databricks_job_id": "{{job.id}}",
@@ -12,6 +12,20 @@
         }
       },
       "max_retries": 3,
+      "min_retry_interval_millis": 120000,
+      "retry_on_timeout": true
+    },
+    {
+      "task_key": "dlt_refresh",
+      "depends_on": [
+        {
+          "task_key": "fetch_bronze"
+        }
+      ],
+      "pipeline_task": {
+        "pipeline_id": "7d08b214-8dda-480c-9b2f-6205a8496e68"
+      },
+      "max_retries": 1,
       "min_retry_interval_millis": 120000,
       "retry_on_timeout": true
     }

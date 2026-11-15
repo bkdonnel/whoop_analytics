@@ -1,0 +1,16 @@
+{
+  "name": "whoop_bronze_dlt_ingestion",
+  "catalog": "bootcamp_students",
+  "schema": "bryan_whoop_bronze",
+  "serverless": true,
+  "photon": true,
+  "continuous": false,
+  "development": false,
+  "libraries": [
+    {
+      "notebook": {
+        "path": "/Users/bryankdonnelly@comcast.net/whoop_analytics/pipelines/whoop_dlt_ingestion"
+      }
+    }
+  ]
+}
