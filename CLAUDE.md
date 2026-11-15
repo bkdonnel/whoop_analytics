@@ -2,7 +2,7 @@
 
 ## Project
 
-Whoop Analytics Pipeline — see `README.md` for full project scope, differentiation strategy, data sources, stack, and build sequencing, and `IMPLEMENTATION.md` for the phased build plan and current progress. As of 2026-11-13, Phase 0 (project setup) is complete: code is pushed to a public GitHub remote (`github.com/bkdonnel/whoop_analytics`), a Whoop developer app is registered, and the Databricks workspace/schemas and secret scope are set up (see `IMPLEMENTATION.md` for the shared-metastore schema layout this required). No ingestion/dashboard code exists yet; Phase 1 (OAuth flow + Bronze ingestion) is next.
+Whoop Analytics Pipeline — see `README.md` for full project scope, differentiation strategy, data sources, stack, and build sequencing, and `IMPLEMENTATION.md` for the phased build plan and current progress. As of 2026-11-15, Phase 0 (project setup) and Phase 1 (Whoop OAuth + Bronze ingestion) are both complete: code is pushed to a public GitHub remote (`github.com/bkdonnel/whoop_analytics`), a Whoop developer app is registered, the Databricks workspace/schemas and secret scope are set up (see `IMPLEMENTATION.md` for the shared-metastore schema layout this required), and a Databricks notebook (`notebooks/01_whoop_ingest_bronze.py`, developed via a Databricks Repo synced to this GitHub remote) ingests recovery/cycle/sleep/workout data into Bronze Delta tables with full backfill, incremental pulls, and idempotent upsert — verified against the live API. No Silver/Gold/dashboard code exists yet; Phase 2 (orchestration — scheduled Databricks Job, retries, alerting) is next, needed for the user's goal of unattended daily runs.
 
 ## Dashboard content design (decided 2026-11-11)
 
