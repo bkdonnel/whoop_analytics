@@ -34,6 +34,14 @@
 # table; a column that comes back all-NULL means its JSON path needs fixing
 # against an actual raw_payload value (`SELECT raw_payload FROM
 # bootcamp_students.bryan_whoop_bronze.sleep LIMIT 1`, etc.).
+#
+# Each table's `name` is a fully-qualified catalog.schema.table name rather
+# than a plain name plus a `schema=` kwarg — tried that first, but `schema=`
+# on @dlt.table is a DDL column-definition string (for declaring a table's
+# columns up front), not a target-schema override, and silently produced an
+# invalid CREATE TABLE statement. The fully-qualified `name` is what actually
+# routes a table to a schema other than the pipeline's configured default
+# (multi-schema-per-pipeline, GA since March 2025).
 
 # COMMAND ----------
 
@@ -73,8 +81,7 @@ RECOVERY_SCHEMA = T.StructType([
 
 
 @dlt.table(
-    name="recovery_silver",
-    schema=SILVER_SCHEMA,
+    name=f"{SILVER_SCHEMA}.recovery_silver",
     comment="Silver: one row per cycle, recovery fields flattened and typed",
 )
 @dlt.expect_or_fail("cycle_id_present", "cycle_id IS NOT NULL")
@@ -119,8 +126,7 @@ CYCLE_SCHEMA = T.StructType([
 
 
 @dlt.table(
-    name="cycle_silver",
-    schema=SILVER_SCHEMA,
+    name=f"{SILVER_SCHEMA}.cycle_silver",
     comment="Silver: one row per physiological cycle/day, strain fields flattened and typed",
 )
 @dlt.expect_or_fail("cycle_id_present", "cycle_id IS NOT NULL")
@@ -183,8 +189,7 @@ SLEEP_SCHEMA = T.StructType([
 
 
 @dlt.table(
-    name="sleep_silver",
-    schema=SILVER_SCHEMA,
+    name=f"{SILVER_SCHEMA}.sleep_silver",
     comment="Silver: one row per sleep session (naps included, flagged via is_nap), fields flattened and typed",
 )
 @dlt.expect_or_fail("sleep_id_present", "sleep_id IS NOT NULL")
@@ -256,8 +261,7 @@ WORKOUT_SCHEMA = T.StructType([
 
 
 @dlt.table(
-    name="workout_silver",
-    schema=SILVER_SCHEMA,
+    name=f"{SILVER_SCHEMA}.workout_silver",
     comment="Silver: one row per workout, strain/HR/zone fields flattened and typed",
 )
 @dlt.expect_or_fail("workout_id_present", "workout_id IS NOT NULL")
