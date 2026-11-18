@@ -147,9 +147,9 @@ def strain_next_day_recovery_gold():
     paired = _with_day_index(paired, "cycle_date")
 
     rolling_90d = Window.orderBy("day_index").rangeBetween(-89, 0)
-    return paired.select("cycle_id", "cycle_date", "strain", "next_day_recovery_score").withColumn(
+    return paired.withColumn(
         "rolling_90d_correlation", F.corr("strain", "next_day_recovery_score").over(rolling_90d)
-    )
+    ).select("cycle_id", "cycle_date", "strain", "next_day_recovery_score", "rolling_90d_correlation")
 
 # COMMAND ----------
 # ── Same-day: Recovery(day N) -> Strain(day N) ──────────────────────────────
@@ -171,7 +171,7 @@ def recovery_same_day_strain_gold():
     rolling_90d = Window.orderBy("day_index").rangeBetween(-89, 0)
     return paired.withColumn(
         "rolling_90d_correlation", F.corr("recovery_score", "strain").over(rolling_90d)
-    )
+    ).select("cycle_id", "cycle_date", "recovery_score", "strain", "rolling_90d_correlation")
 
 # COMMAND ----------
 # ── Recovery-score momentum (7-day MA vs 28-day MA crossover) ──────────────
