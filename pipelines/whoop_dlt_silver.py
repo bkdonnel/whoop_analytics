@@ -26,14 +26,20 @@
 # `timezone_offset` string is kept as its own column for anyone who later
 # needs the wearer's local time.
 #
-# Field paths below are the best-known WHOOP v2 schema as of this project's
-# last API research pass. Only recovery_score, strain, and
-# sleep_performance_percentage were spot-checked against this account's live
-# payloads (in Phase 1, by the Bronze layer) — the remaining fields are not
-# yet verified. After first deploying this, check a sample Silver row per
-# table; a column that comes back all-NULL means its JSON path needs fixing
-# against an actual raw_payload value (`SELECT raw_payload FROM
-# bootcamp_students.bryan_whoop_bronze.sleep LIMIT 1`, etc.).
+# Field paths below are confirmed against this account's real payloads for
+# sleep (full score struct, via a first-deploy failure log) and workout (all
+# top-level/score fields except distance_meter/altitude_*, which were null on
+# the sampled record and so unconfirmed either way), plus recovery_score,
+# strain, and sleep_performance_percentage from Phase 1's Bronze spot-check.
+# Not yet confirmed: the rest of RECOVERY_SCHEMA, and CYCLE_SCHEMA entirely
+# (no cycle_silver failure/row has been inspected yet). First deploy already
+# caught two real mismatches this way: WHOOP's `id` is a UUID string for
+# sleep/workout but a plain integer for cycle (and for cycle_id/sleep_id
+# foreign keys, which stay integer/string respectively — don't assume `id`
+# typing generalizes to a FK of the same name), and workout's zone breakdown
+# key is `zone_durations` (plural), not `zone_duration`. If another column
+# comes back all-NULL after this deploys, check its JSON path the same way:
+# `SELECT raw_payload FROM bootcamp_students.bryan_whoop_bronze.cycle LIMIT 1`.
 #
 # Each table's `name` is a fully-qualified catalog.schema.table name rather
 # than a plain name plus a `schema=` kwarg — tried that first, but `schema=`
@@ -65,7 +71,7 @@ def _flatten(bronze_table: str, payload_schema: T.StructType) -> DataFrame:
 
 RECOVERY_SCHEMA = T.StructType([
     T.StructField("cycle_id", T.LongType()),
-    T.StructField("sleep_id", T.LongType()),
+    T.StructField("sleep_id", T.StringType()),
     T.StructField("user_id", T.LongType()),
     T.StructField("created_at", T.TimestampType()),
     T.StructField("updated_at", T.TimestampType()),
@@ -154,7 +160,8 @@ def cycle_silver():
 # ── SLEEP ────────────────────────────────────────────────────────────────────
 
 SLEEP_SCHEMA = T.StructType([
-    T.StructField("id", T.LongType()),
+    T.StructField("id", T.StringType()),
+    T.StructField("cycle_id", T.LongType()),
     T.StructField("user_id", T.LongType()),
     T.StructField("created_at", T.TimestampType()),
     T.StructField("updated_at", T.TimestampType()),
@@ -199,6 +206,7 @@ def sleep_silver():
     flattened = _flatten("sleep", SLEEP_SCHEMA)
     return flattened.select(
         F.col("id").alias("sleep_id"),
+        "cycle_id",
         "user_id",
         "created_at",
         "updated_at",
@@ -230,7 +238,7 @@ def sleep_silver():
 # ── WORKOUT ──────────────────────────────────────────────────────────────────
 
 WORKOUT_SCHEMA = T.StructType([
-    T.StructField("id", T.LongType()),
+    T.StructField("id", T.StringType()),
     T.StructField("user_id", T.LongType()),
     T.StructField("created_at", T.TimestampType()),
     T.StructField("updated_at", T.TimestampType()),
@@ -238,6 +246,7 @@ WORKOUT_SCHEMA = T.StructType([
     T.StructField("end", T.TimestampType()),
     T.StructField("timezone_offset", T.StringType()),
     T.StructField("sport_id", T.IntegerType()),
+    T.StructField("sport_name", T.StringType()),
     T.StructField("score_state", T.StringType()),
     T.StructField("score", T.StructType([
         T.StructField("strain", T.DoubleType()),
@@ -248,7 +257,7 @@ WORKOUT_SCHEMA = T.StructType([
         T.StructField("distance_meter", T.DoubleType()),
         T.StructField("altitude_gain_meter", T.DoubleType()),
         T.StructField("altitude_change_meter", T.DoubleType()),
-        T.StructField("zone_duration", T.StructType([
+        T.StructField("zone_durations", T.StructType([
             T.StructField("zone_zero_milli", T.LongType()),
             T.StructField("zone_one_milli", T.LongType()),
             T.StructField("zone_two_milli", T.LongType()),
@@ -278,6 +287,7 @@ def workout_silver():
         F.col("end").alias("workout_end_at"),
         "timezone_offset",
         "sport_id",
+        "sport_name",
         "score_state",
         F.col("score.strain").alias("strain"),
         F.col("score.average_heart_rate").alias("average_heart_rate"),
@@ -287,11 +297,11 @@ def workout_silver():
         F.col("score.distance_meter").alias("distance_meter"),
         F.col("score.altitude_gain_meter").alias("altitude_gain_meter"),
         F.col("score.altitude_change_meter").alias("altitude_change_meter"),
-        F.col("score.zone_duration.zone_zero_milli").alias("zone_zero_milli"),
-        F.col("score.zone_duration.zone_one_milli").alias("zone_one_milli"),
-        F.col("score.zone_duration.zone_two_milli").alias("zone_two_milli"),
-        F.col("score.zone_duration.zone_three_milli").alias("zone_three_milli"),
-        F.col("score.zone_duration.zone_four_milli").alias("zone_four_milli"),
-        F.col("score.zone_duration.zone_five_milli").alias("zone_five_milli"),
+        F.col("score.zone_durations.zone_zero_milli").alias("zone_zero_milli"),
+        F.col("score.zone_durations.zone_one_milli").alias("zone_one_milli"),
+        F.col("score.zone_durations.zone_two_milli").alias("zone_two_milli"),
+        F.col("score.zone_durations.zone_three_milli").alias("zone_three_milli"),
+        F.col("score.zone_durations.zone_four_milli").alias("zone_four_milli"),
+        F.col("score.zone_durations.zone_five_milli").alias("zone_five_milli"),
         "ingested_at",
     )
