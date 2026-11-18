@@ -11,6 +11,11 @@
       "notebook": {
         "path": "/Users/bryankdonnelly@comcast.net/whoop_analytics/pipelines/whoop_dlt_ingestion"
       }
+    },
+    {
+      "notebook": {
+        "path": "/Users/bryankdonnelly@comcast.net/whoop_analytics/pipelines/whoop_dlt_silver"
+      }
     }
   ]
 }

@@ -51,9 +51,11 @@ Job definition checked into the repo as `jobs/whoop_bronze_ingestion_daily.json`
 
 ## Phase 4 — Silver layer (cleaned/conformed)
 
-1. Transform Bronze → Silver: flatten nested JSON fields, cast types, standardize timestamps to a single timezone, rename fields to consistent naming.
-2. Conform grain per domain: one row per cycle/day (recovery, strain), one row per sleep session, one row per workout.
-3. Re-run the Phase 3 quality checks against Silver as well, since transformation can introduce its own bugs.
+**In progress, started 2026-11-18.** Built as a second library file (`pipelines/whoop_dlt_silver.py`) in the *same* DLT pipeline as `whoop_dlt_ingestion.py` (wired into `pipelines/whoop_dlt_ingestion_pipeline.json`), rather than a separate pipeline/job task — this keeps `dlt.read_stream()` reads of the Bronze tables within one pipeline graph (simple, standard DLT) instead of needing cross-pipeline change-feed reads (more fragile, no benefit here since both layers already run on the same schedule). Tables publish to the `bryan_whoop_silver` schema via each `@dlt.table`'s `schema=` override (multi-schema-per-pipeline, GA since March 2025) but keep an explicit `_silver` suffix (`recovery_silver`, `cycle_silver`, `sleep_silver`, `workout_silver`) because DLT dataset names must be unique pipeline-wide, not just per schema, and Bronze already owns the bare names.
+
+1. 🔧 Transform Bronze → Silver: flatten nested JSON fields (via `from_json` against an explicit struct schema per domain, not ad hoc `get_json_object` calls), cast types, standardize timestamps to UTC (`timezone_offset` kept as its own column for later local-time derivation), rename fields for clarity (`id` → `cycle_id`/`sleep_id`/`workout_id`, `start`/`end` → domain-prefixed). **Written, not yet deployed/run** — only `recovery_score`, `strain`, and `sleep_performance_percentage` (the three fields Bronze already extracts) are confirmed against this account's live payloads; the rest of each domain's fields are the best-known WHOOP v2 schema from research, not yet spot-checked. First deploy needs a check of one sample row per Silver table for unexpected all-NULL columns (wrong JSON path) before trusting it.
+2. ✅ Conform grain per domain — this fell out of Bronze's existing natural-key dedup rather than needing new logic: recovery and cycle are already one row per cycle, sleep and workout one row per session. Sleep's `nap` field is surfaced as `is_nap` so Gold-layer day-level metrics can exclude naps explicitly instead of this layer silently dropping or merging them.
+3. 🔧 Re-run the Phase 3 quality checks against Silver: same tiered pattern (`expect_or_fail` on key/`score_state` presence, log-only `expect` on score ranges), now against the flattened/typed columns rather than Bronze's `get_json_object` extracts — catches a bug in this layer's own parsing/casting that Bronze's checks wouldn't see. Written, not yet run.
 
 ## Phase 5 — Gold layer (derived metrics)
 
