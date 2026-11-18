@@ -65,13 +65,13 @@ Job definition checked into the repo as `jobs/whoop_bronze_ingestion_daily.json`
 
 ## Phase 5 — Gold layer (derived metrics)
 
-Build each metric as its own transformation, per the definitions locked in `CLAUDE.md`:
+**In progress, started 2026-11-18.** Built as a third library file (`pipelines/whoop_dlt_gold.py`) in the same DLT pipeline as Bronze/Silver (wired into `pipelines/whoop_dlt_ingestion_pipeline.json`), publishing to `bootcamp_students.bryan_whoop_gold` via a fully-qualified `name` per table, same pattern Phase 4 settled on. Reads Silver via `dlt.read` (batch, not streaming) since every metric here is a trailing-window calculation over the full history — small enough (~1500 rows/table) that recomputing from scratch each run is simpler than incremental window-function state. All rolling windows use a calendar-day index (`datediff` from a fixed epoch) with `rangeBetween`, not row position (`rowsBetween`), so a missed-wear gap day doesn't silently shrink a "7-day" window to fewer actual days. **Written, not yet deployed/verified** — same next step as Phase 4: push, pull into the Databricks Repo, deploy, and spot-check real output (plus the Phase 5.5 manual hand-check below) before trusting it.
 
-1. **ACWR** — 7-day rolling average / 28-day rolling average of daily Strain score, per day.
-2. **Personal rolling-percentile baseline** — for each metric of interest (start with Recovery, HRV, RHR), compute today's percentile rank against its own trailing 60-day window.
-3. **Lagged correlation** — compute rolling-window Pearson correlation (and significance) for: Strain(day N) vs Recovery(N+1), and Recovery(N) vs same-day Strain. Store both the coefficient and enough underlying data to generate the scatter chart + caption later.
-4. **Recovery momentum** — 7-day MA vs 28-day MA of Recovery score, plus a derived state (`rising`/`declining`/`flat`) from the crossover.
-5. Validate each derived metric against a manual spot-check (hand-compute ACWR for one known week and confirm it matches).
+1. 🔧 **ACWR** — 7-day rolling average / 28-day rolling average of daily Strain score, per day. Table: `cycle_acwr_gold` (`cycle_id`, `cycle_date`, `strain`, `acute_load_7d`, `chronic_load_28d`, `acwr`).
+2. 🔧 **Personal rolling-percentile baseline** — Recovery score, HRV, and RHR each as a percentile rank against their own trailing 60-day window (`size(filter(window_values, x -> x <= today)) / size(window_values) * 100`, since Spark has no built-in trailing-window percentile-rank function). Table: `recovery_baseline_gold`. Note for Phase 6's caption logic: lower RHR is physiologically better, so a high `rhr_percentile_60d` means "higher than usual," not "healthier" — needs different phrasing than the recovery/HRV percentiles, which both read "higher is better."
+3. 🔧 **Lagged correlation** — two tables, each a rolling 90-day Pearson correlation (`F.corr(...).over(window)`) plus the underlying paired data for a scatter chart: `strain_next_day_recovery_gold` (Strain(day N) vs Recovery(day N+1), joined via `date_sub(cycle_date, 1)` on the recovery side) and `recovery_same_day_strain_gold` (Recovery(day N) vs same-day Strain(day N)).
+4. 🔧 **Recovery momentum** — 7-day MA vs 28-day MA of Recovery score, plus a derived state (`rising`/`declining`/`flat`) from comparing the two with a small flat-band tolerance (±2 points) rather than exact equality. Table: `recovery_momentum_gold`.
+5. ⬜ Validate each derived metric against a manual spot-check (hand-compute ACWR for one known week and confirm it matches) — not started; do this once deployed.
 
 ## Phase 6 — Dashboard (AI/BI Dashboard)
 
