@@ -7,9 +7,17 @@
 # feed across pipelines instead, which is more fragile for no benefit here.
 #
 # Bronze's apply_changes already guarantees one row per natural key, so each
-# Silver table below is a straight 1:1 streaming flatten of raw_payload's
-# JSON into typed, consistently-named columns — no apply_changes/MERGE of its
-# own is needed. Table names carry an explicit _silver suffix (e.g.
+# Silver table below is a straight 1:1 flatten of raw_payload's JSON into
+# typed, consistently-named columns — no apply_changes/MERGE of its own is
+# needed. Read via dlt.read() (batch), not dlt.read_stream(): Bronze tables
+# are apply_changes targets that receive MERGE writes whenever Whoop revises
+# an already-scored record, and a streaming read can't tolerate that (hit in
+# production 2026-11-19 — recovery_silver failed with
+# DELTA_SOURCE_TABLE_IGNORE_CHANGES the first time a real update, not just an
+# insert, landed on Bronze). A materialized view recomputes from scratch each
+# run instead of tailing an append-only log, so it handles upstream
+# updates/deletes correctly — the same reason Gold reads Silver via dlt.read
+# rather than dlt.read_stream. Table names carry an explicit _silver suffix (e.g.
 # recovery_silver) even though they live in the bryan_whoop_silver schema,
 # because a DLT pipeline's dataset names must be unique across the whole
 # pipeline graph, not just within a schema, and Bronze already owns the name
@@ -61,7 +69,7 @@ SILVER_SCHEMA = "bootcamp_students.bryan_whoop_silver"
 
 def _flatten(bronze_table: str, payload_schema: T.StructType) -> DataFrame:
     return (
-        dlt.read_stream(bronze_table)
+        dlt.read(bronze_table)
         .withColumn("payload", F.from_json("raw_payload", payload_schema))
         .select("payload.*", "ingested_at")
     )
