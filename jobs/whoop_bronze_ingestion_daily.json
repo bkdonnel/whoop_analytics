@@ -28,6 +28,21 @@
       "max_retries": 1,
       "min_retry_interval_millis": 120000,
       "retry_on_timeout": true
+    },
+    {
+      "task_key": "export_dashboard_data",
+      "depends_on": [
+        {
+          "task_key": "dlt_refresh"
+        }
+      ],
+      "notebook_task": {
+        "notebook_path": "/Users/bryankdonnelly@comcast.net/whoop_analytics/notebooks/02_export_dashboard_data",
+        "source": "WORKSPACE"
+      },
+      "max_retries": 3,
+      "min_retry_interval_millis": 120000,
+      "retry_on_timeout": true
     }
   ],
   "schedule": {
