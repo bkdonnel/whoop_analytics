@@ -20,6 +20,8 @@ On top of that engineering foundation, 1-2 genuinely novel derived metrics that 
 - **ACWR** (acute:chronic workload ratio) — a real sports-science overtraining indicator
 - A personal rolling-percentile baseline, instead of Whoop's population-normed scores
 
+The dashboard itself is also part of the engineering story (decided 2026-11-21, see `CLAUDE.md`'s "Dashboard architecture" section): rather than embedding Databricks' own AI/BI Dashboard tool, it's a standalone app with zero runtime dependency on Databricks compute — the pipeline exports computed data once a day, and the dashboard serves entirely from that export. "Built a custom analytics app end-to-end" is the intended framing, not "wired up a vendor BI tool."
+
 ## Data sources
 
 ### Phase 1 (MVP): Whoop API
@@ -49,20 +51,24 @@ On top of that engineering foundation, 1-2 genuinely novel derived metrics that 
 
 ## Stack
 
-- **Databricks** (Spark/Delta pipeline + Databricks Jobs for orchestration + AI/BI Dashboards) — chosen deliberately to reuse existing Databricks access, while keeping the emphasis intentionally different from the existing bootcamp capstone (that project is agent/RAG-focused; this one is ingestion/orchestration-focused) so the two don't read as repetitive to a reviewer.
+- **Databricks** (Spark/Delta pipeline + Databricks Jobs for orchestration) — chosen deliberately to reuse existing Databricks access, while keeping the emphasis intentionally different from the existing bootcamp capstone (that project is agent/RAG-focused; this one is ingestion/orchestration-focused) so the two don't read as repetitive to a reviewer. Databricks' job is ingestion/transformation only — it does not serve the dashboard.
+- **Next.js on Vercel** — the dashboard frontend, in `/dashboard` in this same repo. Deployed continuously (via Vercel's GitHub integration); fetches data server-side from Cloudflare R2 on each request/revalidation, never directly from Databricks.
+- **Cloudflare R2** — holds the daily JSON export (full Gold-layer history, not just pre-computed windows) that the dashboard reads. S3-compatible API, zero egress fees. Private bucket; only the Next.js server and the Databricks export step hold credentials.
 
 ## Recruiter accessibility (hard requirement)
 
 The finished project must be viewable by a recruiter/hiring manager with no friction — no login, no account creation.
 
 - **Databricks Apps cannot be made public** — confirmed via Databricks' own community support that Apps can only be shared with authenticated Databricks users, even on Free Edition. Not usable for this requirement.
-- **Databricks AI/BI Dashboards *can* be embedded for fully public, login-free viewing**, via the "external embedding" mechanism: a service principal plus a small, separately-hosted token server that mints scoped access tokens, letting anyone load the dashboard with zero Databricks account. This is the path chosen for this project — more engineering lift than a static README, but it's also a legitimate, distinct engineering artifact in its own right (most candidates don't bother solving "make my internal analytics dashboard public").
+- **Databricks AI/BI Dashboards can be embedded for public, login-free viewing** via a service-principal + token-server "external embedding" mechanism — this was the original plan, but was dropped 2026-11-21 in favor of a standalone app (see `CLAUDE.md`'s "Dashboard architecture" section for the reasoning: distrust of the embedding mechanism actually being frictionless, and not wanting a live Databricks SQL warehouse as a runtime dependency for every dashboard view). Kept here as a decision record, not the current plan.
+- **Current plan**: the dashboard is a standalone Next.js app on Vercel, with zero runtime dependency on Databricks. Public/login-free access falls out of this for free — there's no Databricks-side gate to solve at all, since Vercel serves the app directly to anyone with the URL.
 
 ## Build sequencing
 
-1. **Phase 1 (MVP)**: Whoop ingestion pipeline — incremental daily pulls, Delta tables, data quality checks, Databricks Jobs orchestration with retries/alerting, derived metrics (ACWR, rolling baselines), AI/BI dashboard.
-2. **Public dashboard access**: service principal + token server for external embedding, deployed publicly (hosting TBD — a free tier like Render/Vercel/Fly.io is the likely target).
-3. **Phase 2 (stretch)**: Start logging surf sessions on the Garmin now; once enough sessions accumulate, pull via Garmin's Personal API and join against Whoop recovery/strain data to test the recovery-vs-surf-quality question.
-4. **Possible phase 3**: Additional source (Spotify's no-backfill ingestion pattern, or Open-Meteo weather archive) if more source diversity is wanted.
+1. **Phase 1 (MVP)**: Whoop ingestion pipeline — incremental daily pulls, Delta tables, data quality checks, Databricks Jobs orchestration with retries/alerting, derived metrics (ACWR, rolling baselines).
+2. **Dashboard data export**: a new Databricks Job task, after the Gold-layer refresh, exports Gold (+ run-metadata for Pipeline Health) as JSON to a private Cloudflare R2 bucket, then triggers Vercel on-demand revalidation — fully automated, part of the same daily unattended run.
+3. **Dashboard frontend**: a Next.js app (`/dashboard` in this repo), deployed on Vercel, fetching that export server-side and rendering the five sections defined in `CLAUDE.md`.
+4. **Phase 2 (stretch)**: Start logging surf sessions on the Garmin now; once enough sessions accumulate, pull via Garmin's Personal API and join against Whoop recovery/strain data to test the recovery-vs-surf-quality question.
+5. **Possible phase 3**: Additional source (Spotify's no-backfill ingestion pattern, or Open-Meteo weather archive) if more source diversity is wanted.
 
 No hard deadline, but the explicit priority is finishing at a reasonable pace rather than maximizing scope.

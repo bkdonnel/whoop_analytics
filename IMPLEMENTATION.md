@@ -79,27 +79,37 @@ First deploy caught two real bugs, both self-inflicted (not Databricks quirks li
 4. ✅ **Recovery momentum** — 7-day MA vs 28-day MA of Recovery score, plus a derived state (`rising`/`declining`/`flat`) from comparing the two with a small flat-band tolerance (±2 points) rather than exact equality. Table: `recovery_momentum_gold`.
 5. ✅ Validated each derived metric via the SQL Statement Execution API (2026-11-18), both for structural correctness and physiological plausibility: ACWR hand-checked for 2026-11-18 (9.7295/12.08 = 0.8054, matches stored value exactly); Strain→next-day-Recovery correlation came back consistently negative (~−0.41 to −0.43, strain predicts a next-day recovery *drop*, matching CLAUDE.md's own example caption's magnitude); same-day Recovery↔Strain correlation came back near zero (recovery is capacity, not realized same-day strain); a 100th-percentile RHR row lined up with that period's worst recovery score — all directionally sane, not just error-free.
 
-## Phase 6 — Dashboard (AI/BI Dashboard)
+## Phase 6 — Dashboard data export
 
-Build the five sections defined in `CLAUDE.md`, in this order:
+**Replaces the original "Phase 6 (AI/BI Dashboard)" plan, superseded 2026-11-21** — see `CLAUDE.md`'s "Dashboard architecture" section for the reasoning (dropped Databricks AI/BI Dashboard + embedding entirely in favor of a standalone app).
 
-1. **Pipeline Health** — build first; it only needs the Phase 2/3 run-metadata table, and proves the dashboard-to-Gold(ish) connection works before tackling harder visuals. Tiles: last sync freshness, % days complete, QA pass rate.
-2. **Today** — snapshot tiles per domain (Recovery, Sleep, Strain, latest Workout) plus the momentum state.
-3. **Trends** — rolling charts (7/30/90-day) per domain, with the 60-day percentile baseline overlaid.
-4. **Derived Insights** — ACWR chart, lagged-correlation scatter + generated caption, momentum MA-crossover chart + generated caption.
-5. Write the caption-generation logic (short template filling in the actual computed numbers, e.g. "strain above X preceded a Y-point recovery drop, r = Z") as a small function/notebook step feeding the dashboard's text widgets, not hand-written text.
+1. Create a private Cloudflare R2 bucket for the dashboard's data export; store its access key/secret in the Databricks secret scope (a Cloudflare credential, not a Databricks PAT — the account's no-PAT restriction doesn't apply here).
+2. Add a new task to `jobs/whoop_bronze_ingestion_daily.json` (`export_dashboard_data`), depending on `dlt_refresh`, running a notebook that:
+   - Queries the four Gold tables (full history, not just pre-computed 7/30/90-day windows — later dashboard changes should be pure frontend work) and `bootcamp_students.bryan_whoop_bronze.run_metadata` (for Pipeline Health: last sync freshness, % days complete, QA pass rate from DLT's `event_log`).
+   - Writes the result as JSON file(s) and uploads them to the R2 bucket.
+   - As its last step, calls Vercel's on-demand revalidation API (Vercel API token also in the Databricks secret scope) so the live dashboard picks up the new data within seconds, not on some separate timer.
+3. Add retry policy + the same `email_notifications.on_failure` alerting the other two tasks already have — a broken export should be as loud as a broken ingestion.
+4. Verify end-to-end: confirm the R2 bucket receives fresh JSON after a `jobs run-now`, and that the revalidation call actually invalidates the Next.js app's cached data (once Phase 7 exists to check against).
 
-## Phase 7 — Public access
+## Phase 7 — Dashboard frontend
 
-1. Create a Databricks service principal scoped read-only to the dashboard's underlying data.
-2. Build the small token server (mints short-lived scoped access tokens for the external-embedding flow) — pick a minimal framework (e.g. FastAPI/Flask).
-3. Deploy the token server to a free-tier host (Render/Vercel/Fly.io — confirm which still offers a free tier at build time).
-4. Embed the AI/BI Dashboard via the external-embedding mechanism on a simple static page (or directly via the token server's own served page) and confirm it loads with zero Databricks login in a private/incognito browser session.
+**Replaces the original "Phase 7 (Public access)" plan** — no service principal, no token server, no Databricks embedding. Public/login-free access falls out of the architecture for free: Vercel just serves the app to anyone with the URL.
+
+1. Scaffold a Next.js app in `/dashboard` in this repo (same repo as the pipeline, not a separate one — keeps the whole pipeline+dashboard story in one place for a recruiter browsing GitHub).
+2. Server-side fetch from the private R2 bucket (credentials as Vercel environment variables, never exposed client-side) — compute the 7/30/90-day windows and fill caption templates in app code, not in Databricks.
+3. Build the five sections defined in `CLAUDE.md`'s "Dashboard content design", in this order:
+   - **Pipeline Health** — build first; it only needs the exported run-metadata slice, and proves the export-to-frontend connection works before tackling harder visuals. Tiles: last sync freshness, % days complete, QA pass rate.
+   - **Today** — snapshot tiles per domain (Recovery, Sleep, Strain, latest Workout) plus the momentum state.
+   - **Trends** — rolling charts (7/30/90-day) per domain, with the 60-day percentile baseline overlaid.
+   - **Derived Insights** — ACWR chart, lagged-correlation scatter + generated caption, momentum MA-crossover chart + generated caption.
+4. Write the caption-generation logic (template filling in the actual computed numbers, e.g. "strain above X preceded a Y-point recovery drop, r = Z") as app code, not hand-written text.
+5. Deploy to Vercel via its GitHub integration (auto-deploy on push to this repo); confirm the live URL loads with zero Databricks login in a private/incognito browser session.
+6. Wire up the on-demand revalidation endpoint/secret that Phase 6's export step calls, and confirm a `jobs run-now` actually updates the live dashboard within seconds, not just on a redeploy.
 
 ## Phase 8 — End-to-end validation
 
-1. Let the daily job run unattended for at least a week; confirm no manual intervention was needed and Pipeline Health reflects reality.
-2. Intentionally break something (e.g. revoke a token, feed a malformed record) to confirm retries/alerting/quarantine actually fire.
+1. Let the daily job (now three tasks: fetch, DLT refresh, dashboard export) run unattended for at least a week; confirm no manual intervention was needed and Pipeline Health reflects reality.
+2. Intentionally break something (e.g. revoke the R2 or Vercel credential, feed a malformed record) to confirm retries/alerting/quarantine actually fire.
 3. Recruiter-readability pass: have someone unfamiliar with the project view the public dashboard cold and confirm the Derived Insights captions are understandable without extra explanation.
 
 ## Phase 9 — Phase 2 (stretch): Garmin surf data
