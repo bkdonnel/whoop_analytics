@@ -97,16 +97,18 @@ First deploy caught two real bugs, both self-inflicted (not Databricks quirks li
 
 **Replaces the original "Phase 7 (Public access)" plan** — no service principal, no token server, no Databricks embedding. Public/login-free access falls out of the architecture for free: Vercel just serves the app to anyone with the URL.
 
-1. Scaffold a Next.js app in `/dashboard` in this repo (same repo as the pipeline, not a separate one — keeps the whole pipeline+dashboard story in one place for a recruiter browsing GitHub).
-2. Server-side fetch from the private R2 bucket (credentials as Vercel environment variables, never exposed client-side) — compute the 7/30/90-day windows and fill caption templates in app code, not in Databricks.
-3. Build the five sections defined in `CLAUDE.md`'s "Dashboard content design", in this order:
-   - **Pipeline Health** — build first; it only needs the exported run-metadata slice, and proves the export-to-frontend connection works before tackling harder visuals. Tiles: last sync freshness, % days complete, QA pass rate.
-   - **Today** — snapshot tiles per domain (Recovery, Sleep, Strain, latest Workout) plus the momentum state.
-   - **Trends** — rolling charts (7/30/90-day) per domain, with the 60-day percentile baseline overlaid.
-   - **Derived Insights** — ACWR chart, lagged-correlation scatter + generated caption, momentum MA-crossover chart + generated caption.
-4. Write the caption-generation logic (template filling in the actual computed numbers, e.g. "strain above X preceded a Y-point recovery drop, r = Z") as app code, not hand-written text.
-5. Deploy to Vercel via its GitHub integration (auto-deploy on push to this repo); confirm the live URL loads with zero Databricks login in a private/incognito browser session.
-6. Wire up the on-demand revalidation endpoint/secret that Phase 6's export step calls, and confirm a `jobs run-now` actually updates the live dashboard within seconds, not just on a redeploy.
+✅ **Done 2026-11-24.** Live at `https://whoop-analytics.vercel.app` (Vercel project `whoop-analytics`, GitHub integration, Root Directory `dashboard`).
+
+1. ✅ Scaffolded a Next.js app in `/dashboard` (App Router, TypeScript, Tailwind, Next.js 16's Cache Components model). Chart/stat-tile components follow the dataviz skill's palette and mark conventions (categorical hues in fixed order, status colors reserved, legend for 2+ series, no dual-axis charts — mismatched-unit metrics like HRV/RHR get their own small-multiple charts rather than an overlaid second axis).
+2. ✅ Server-side fetch from the private R2 bucket via `@aws-sdk/client-s3`, wrapped in a `"use cache"` function (`lib/r2.ts`) tagged `dashboard-data` — not Next's built-in `fetch()` cache, which doesn't instrument SDK calls. 7/30/90-day windows and all caption text are computed in app code (`lib/metrics.ts`), not pre-baked in Databricks.
+3. ✅ Built the four sections currently in scope (Surf deferred — no Garmin data yet), in the specified order: Pipeline Health, Today, Trends, Derived Insights. Gold alone doesn't cover Sleep/Workout (it's derived-insights-only), so the export/frontend also reads `sleep_silver`/`workout_silver` directly for those two domains — see Phase 6's note and `CLAUDE.md`.
+4. ✅ Caption generation (`lib/metrics.ts`: `describeStrainNextDayRecovery`, `describeRecoverySameDayStrain`, `describeMomentum`) fills real computed numbers into template strings, matching CLAUDE.md's example phrasing.
+5. ✅ Deployed to Vercel via GitHub integration; confirmed the live URL loads with zero Databricks login in an isolated browser context (no cookies/session).
+6. ✅ Wired up `/api/revalidate` (checks `REVALIDATE_SECRET`, calls `revalidateTag("dashboard-data")`) and the matching `vercel_revalidate_url`/`vercel_revalidate_secret` Databricks secrets. Verified via `jobs run-now`: the live dashboard reflected fresh `run_metadata` within seconds, no redeploy involved.
+
+**Debugging note (2026-11-24):** two earlier `jobs run-now` tests appeared to show the revalidation call silently failing — the job succeeded and (once diagnostic logging was added, see below) reported `{"attempted": true, "ok": true}`, yet the live site kept showing stale data. Root cause: Vercel's GitHub integration rebuilds the `dashboard` project on *every* push to the repo by default, not just changes under `dashboard/` — each notebook-only debugging commit pushed during this session triggered a fresh rebuild, which bakes in whatever R2 state exists at that build moment as a new starting snapshot, overwriting the effect of any revalidation call that happened before it. A clean test (job run with no intervening git push) confirmed the mechanism works correctly — not a real bug, just a confusing interaction from debugging and shipping fixes in the same session. **Not an issue for normal unattended daily operation**, since the pipeline itself never pushes code. Worth considering later: Vercel's "Ignored Build Step" setting (e.g. `git diff --quiet HEAD^ HEAD -- dashboard/`) would skip rebuilds for commits that don't touch `dashboard/`, avoiding both wasted build minutes and this exact confusion if it comes up again.
+
+Also added along the way: `trigger_vercel_revalidation()` in `notebooks/02_export_dashboard_data.py` now returns a status dict persisted to `pipeline_health/revalidation_status.json` in R2, rather than only printing — Databricks' Jobs API doesn't expose notebook stdout for serverless task runs, so this was the only way to actually observe the call's outcome from outside the workspace UI, and is useful ongoing operational visibility now that it exists.
 
 ## Phase 8 — End-to-end validation
 
