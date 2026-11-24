@@ -1,36 +1,29 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Whoop Analytics dashboard
 
-## Getting Started
+Next.js app (App Router, Cache Components) that reads the daily Gold/Silver export
+from a private Cloudflare R2 bucket and renders the four sections defined in the
+repo root's `CLAUDE.md` ("Dashboard content design"): Pipeline Health, Today,
+Trends, Derived Insights.
 
-First, run the development server:
+## Local development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Requires a `.env.local` (see `.env.example`) with read-only R2 credentials.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Data flow
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `lib/r2.ts` fetches each exported JSON file from R2 via the S3-compatible SDK,
+  wrapped in a `"use cache"` function tagged `dashboard-data`.
+- `app/api/revalidate/route.ts` is called by the Databricks export job
+  (`notebooks/02_export_dashboard_data.py`) after each daily run, invalidating
+  that cache tag so new data is live within seconds — no redeploy involved.
 
-## Learn More
+## Deploy
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Deployed on Vercel via its GitHub integration (Root Directory: `dashboard`).
+Required environment variables: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `REVALIDATE_SECRET`.
