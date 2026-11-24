@@ -160,17 +160,32 @@ def export_all(s3_client, bucket: str) -> dict[str, int]:
 # COMMAND ----------
 
 
-def trigger_vercel_revalidation() -> None:
+def trigger_vercel_revalidation() -> dict:
+    # Returns a status dict (rather than just printing) so export_dashboard_data
+    # can persist it to R2 — Databricks' Jobs API doesn't expose notebook stdout
+    # for serverless task runs, so a print-only signal is otherwise unobservable
+    # from outside the workspace UI.
+    status: dict = {"attempted": False, "ok": False, "error": None}
+
     try:
         revalidate_url = dbutils.secrets.get(scope=SECRET_SCOPE, key="vercel_revalidate_url")
         revalidate_secret = dbutils.secrets.get(scope=SECRET_SCOPE, key="vercel_revalidate_secret")
-    except Exception:
-        print("vercel_revalidate_url/secret not set yet (Phase 7 app not deployed) — skipping revalidation call.")
-        return
+    except Exception as error:
+        status["error"] = f"secrets not available: {error}"
+        print(status["error"] + " — skipping revalidation call.")
+        return status
 
-    response = httpx.post(revalidate_url, params={"secret": revalidate_secret}, timeout=20)
-    response.raise_for_status()
-    print("Vercel on-demand revalidation triggered.")
+    status["attempted"] = True
+    try:
+        response = httpx.post(revalidate_url, params={"secret": revalidate_secret}, timeout=20)
+        response.raise_for_status()
+        status["ok"] = True
+        print("Vercel on-demand revalidation triggered.")
+    except Exception as error:
+        status["error"] = str(error)
+        print(f"Vercel revalidation call failed: {error}")
+
+    return status
 
 # COMMAND ----------
 
@@ -180,7 +195,14 @@ def export_dashboard_data() -> None:
     s3_client = r2_client()
     counts = export_all(s3_client, bucket)
     print(f"Dashboard export complete: {counts}")
-    trigger_vercel_revalidation()
+
+    revalidation_status = trigger_vercel_revalidation()
+    s3_client.put_object(
+        Bucket=bucket,
+        Key="pipeline_health/revalidation_status.json",
+        Body=json.dumps(revalidation_status, default=str).encode("utf-8"),
+        ContentType="application/json",
+    )
 
 
 export_dashboard_data()
